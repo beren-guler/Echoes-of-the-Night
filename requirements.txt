@@ -1,0 +1,66 @@
+╔══════════════════════════════════════════════════════════════╗
+║              ECHOES OF THE NIGHT — Gereksinimler             ║
+╚══════════════════════════════════════════════════════════════╝
+
+── ZORUNLU ─────────────────────────────────────────────────────
+
+  Node.js   v18 veya üstü    https://nodejs.org
+  npm       (Node.js ile gelir)
+
+── KURULUM ─────────────────────────────────────────────────────
+
+  1) Proje klasörüne gir:
+       cd echoes_of_the_Night
+
+  2) Bağımlılıkları yükle:
+       npm install
+
+  3) Sunucuyu başlat:
+       npm start
+
+  4) Tarayıcıda aç:
+       http://localhost:3001
+
+── ARDUINO OLMADAN OYNAMA (klavye / fare modu) ──────────────────
+
+  Arduino bağlı olmasa da oyun çalışır.
+  Tarayıcıda ekrandaki nesnelere tıklayarak veya
+  aşağıdaki klavye kısayollarıyla oynayabilirsin:
+
+    W / ↑     Basılı tut → müzik kutusunu çevir (ses artır)
+    F         Basılı tut → feneri yak (dolap canavarına tut)
+    Space     Bas       → yastığa vur (yatak canavarını kov)
+    M         Bas       → dolap canavarını çağır (test)
+    B         Bas       → yatak canavarını çağır (test)
+
+── ARDUINO İLE OYNAMA (isteğe bağlı) ────────────────────────────
+
+  Donanım bileşenleri:
+    - Arduino Uno / Nano
+    - Potansiyometre    → A0  (müzik kutusu ses seviyesi)
+    - Piezo sensör      → A1  (yastık darbesi)
+    - GY-30 BH1750      → A4/A5 I2C (fener lux sensörü)
+
+  Arduino kodunu yükle:
+    Arduino IDE ile echoes_of_night.ino dosyasını aç ve karta yükle.
+
+  Seri port ayarı (varsayılan: /dev/ttyACM0):
+    Windows kullanıyorsan önce port numarasını öğren (örn. COM3),
+    ardından sunucuyu şöyle başlat:
+      ARDUINO_PORT=COM3 npm start
+
+── NODE.JS PAKETLERİ (package.json'dan otomatik yüklenir) ────────
+
+  express                 ^4.18.2   Web sunucusu
+  ws                      ^8.16.0   WebSocket (tarayıcı ↔ sunucu)
+  serialport              ^12.0.0   Arduino seri iletişimi
+  @serialport/parser-readline ^12.0.0
+
+  [geliştirme]
+  nodemon                 ^3.1.0    Otomatik yeniden başlatma
+                                    Kullanım: npm run dev
+
+── HIZLI BAŞLANGIÇ ─────────────────────────────────────────────
+
+  npm install && npm start
+  → http://localhost:3001 adresini tarayıcıda aç

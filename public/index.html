@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Echoes of the Night</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════
+     INTRO SCREEN
+══════════════════════════════════════════════════════════ -->
+<div id="screen-intro" class="screen active">
+  <div class="intro-bg"></div>
+  <div class="intro-content">
+    <h1 class="game-title">Echoes of the Night</h1>
+    <p class="game-subtitle">survive until morning</p>
+    <div class="intro-buttons">
+      <button id="btn-play" class="btn-primary">PLAY</button>
+      <button id="btn-rules" class="btn-secondary">How to Play</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     RULES MODAL
+══════════════════════════════════════════════════════════ -->
+<div id="rules-modal" class="hidden">
+  <div class="modal-box">
+    <h2 class="modal-title">HOW TO PLAY</h2>
+    <ul class="rules-list">
+      <li>
+        <span>🎵</span>
+        <span>Keep the <strong>Music Box</strong> volume high to ward off the darkness. Turn the knob — or hold <kbd>W</kbd> — to refill the bar.</span>
+      </li>
+      <li>
+        <span>👁</span>
+        <span>When the <strong>Wardrobe Monster</strong> appears, aim your flashlight at it and hold steady. It will flee after a moment.</span>
+      </li>
+      <li>
+        <span>💀</span>
+        <span>When something stirs <strong>under the bed</strong>, hit the pillow hard to drive it away.</span>
+      </li>
+      <li>
+        <span>⚠️</span>
+        <span>Listen carefully — some sounds belong to your <strong>parents</strong>. False alarms wake them up. Two strikes and your father arrives… game over.</span>
+      </li>
+      <li>
+        <span>❤️</span>
+        <span>You have <strong>3 hearts</strong>. Lose them all and the monster claims you forever. Survive 3 minutes to see the dawn.</span>
+      </li>
+    </ul>
+
+    <div class="rules-controls">
+      <p style="font-size:0.75rem; color:var(--gold); font-family:var(--font-title); letter-spacing:0.15em; margin-bottom:0.5rem">
+        KEYBOARD CONTROLS
+      </p>
+      <div class="ctrl-row"><kbd>W</kbd> / <kbd>↑</kbd> Hold — increase music box volume</div>
+      <div class="ctrl-row"><kbd>F</kbd> Press once — flashlight (auto-off after 1 s)</div>
+      <div class="ctrl-row"><kbd>Space</kbd> — hit the pillow</div>
+      <div class="ctrl-row" style="opacity:0.5"><kbd>M</kbd> / <kbd>B</kbd> — spawn monster (debug)</div>
+    </div>
+
+    <div class="modal-close-row">
+      <button id="btn-close-rules" class="btn-primary">GOT IT</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     GAME SCREEN
+══════════════════════════════════════════════════════════ -->
+<div id="screen-game" class="screen hidden">
+
+  <!-- Room state images — src injected by ASSETS config in game.js -->
+  <img id="room-idle"        class="room-state" alt="child bedroom night">
+  <img id="room-monster"     class="room-state" alt="monster in wardrobe">
+  <img id="room-flashlight"  class="room-state" alt="flashlight on monster">
+  <img id="room-parents"     class="room-state" alt="parents arrive">
+  <img id="room-bed-monster" class="room-state" alt="monster under bed">
+  <img id="room-bed-pillow"  class="room-state" alt="pillow hits monster">
+
+  <!-- Attack flash overlay -->
+  <div id="attack-flash"></div>
+
+  <!-- HUD -->
+  <div id="game-ui">
+
+    <!-- Top bar -->
+    <div id="top-bar">
+
+      <!-- Left: Music box sanity bar -->
+      <div id="sanity-widget">
+        <div class="sanity-label">
+          <span>🎵 MUSIC BOX</span>
+          <span id="sanity-pct">78%</span>
+        </div>
+        <div class="sanity-outer">
+          <div id="sanity-fill" class="sanity-fill safe"></div>
+        </div>
+        <span class="sanity-subtext">Keep the melody alive…</span>
+      </div>
+
+      <!-- Right: hearts + timer -->
+      <div id="top-right">
+        <div id="hearts-widget">
+          <span class="heart-icon">❤️</span>
+          <span class="heart-icon">❤️</span>
+          <span class="heart-icon">❤️</span>
+        </div>
+        <div id="survival-timer">3:00</div>
+        <div id="arduino-tag">⌨ Keyboard Mode</div>
+      </div>
+
+    </div><!-- /top-bar -->
+
+    <!-- Warning message -->
+    <div id="warning-msg"></div>
+
+    <!-- Monster attack countdown — only shows when visual monster appears -->
+    <div id="monster-timer" class="hidden">
+      <svg class="mt-ring" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+        <circle class="mt-track" cx="24" cy="24" r="20"/>
+        <circle id="mt-arc"      cx="24" cy="24" r="20"/>
+      </svg>
+      <span id="mt-count">14</span>
+    </div>
+
+  </div><!-- /game-ui -->
+
+  <!-- Visual simulation controls (hidden when Arduino connected) -->
+  <div id="sim-controls">
+    <div id="sim-hint">CLICK THE OBJECTS TO PLAY</div>
+
+    <div id="sim-objects">
+
+      <!-- Music Box Knob -->
+      <div class="sim-object" id="obj-musicbox">
+        <div class="obj-label">MUSIC BOX</div>
+        <div class="musicbox-knob-wrap">
+          <div class="musicbox-knob" id="knob">
+            <div class="knob-marker"></div>
+          </div>
+          <div class="knob-hint">hold ↑ / ↓</div>
+        </div>
+        <div class="knob-arrows">
+          <button id="btn-vol-up"   class="knob-arrow up"   title="Turn up">▲</button>
+          <button id="btn-vol-down" class="knob-arrow down" title="Turn down">▼</button>
+        </div>
+      </div>
+
+      <!-- Flashlight -->
+      <div class="sim-object" id="obj-flashlight">
+        <div class="obj-label">FLASHLIGHT</div>
+        <button id="btn-flashlight" class="flashlight-btn" title="Hold to shine at wardrobe">
+          <svg class="flashlight-svg" viewBox="0 0 60 120" xmlns="http://www.w3.org/2000/svg">
+            <!-- Body -->
+            <rect x="18" y="38" width="24" height="65" rx="6" fill="#2a2a2a" stroke="#555" stroke-width="1.5"/>
+            <!-- Grip ridges -->
+            <rect x="18" y="50" width="24" height="3" rx="1" fill="#222"/>
+            <rect x="18" y="58" width="24" height="3" rx="1" fill="#222"/>
+            <rect x="18" y="66" width="24" height="3" rx="1" fill="#222"/>
+            <rect x="18" y="74" width="24" height="3" rx="1" fill="#222"/>
+            <!-- Head -->
+            <ellipse cx="30" cy="36" rx="16" ry="8" fill="#333" stroke="#666" stroke-width="1.5"/>
+            <!-- Lens -->
+            <ellipse cx="30" cy="33" rx="10" ry="6" fill="#1a1a3a"/>
+            <ellipse cx="30" cy="33" rx="10" ry="6" fill="url(#lensGrad)" class="lens"/>
+            <!-- Light beam (shown when active) -->
+            <polygon class="beam" points="20,28 40,28 52,2 8,2" fill="rgba(255,240,160,0)" opacity="0"/>
+            <defs>
+              <radialGradient id="lensGrad" cx="40%" cy="35%">
+                <stop offset="0%" stop-color="#e0e8ff" stop-opacity="0.9"/>
+                <stop offset="100%" stop-color="#3040a0" stop-opacity="0.6"/>
+              </radialGradient>
+            </defs>
+          </svg>
+          <span class="flash-status">HOLD TO SHINE</span>
+        </button>
+      </div>
+
+      <!-- Pillow -->
+      <div class="sim-object" id="obj-pillow">
+        <div class="obj-label">PILLOW</div>
+        <button id="btn-pillow" class="pillow-btn" title="Click to hit">
+          <svg class="pillow-svg" viewBox="0 0 140 100" xmlns="http://www.w3.org/2000/svg">
+            <!-- Pillow body -->
+            <rect x="8" y="12" width="124" height="76" rx="22" fill="#d4c8b8" stroke="#b8a898" stroke-width="2"/>
+            <!-- Pillow surface detail -->
+            <rect x="22" y="26" width="96" height="48" rx="14" fill="#e8ddd0" stroke="#c8b8a8" stroke-width="1.5"/>
+            <!-- Center seam lines -->
+            <line x1="70" y1="26" x2="70" y2="74" stroke="#c8b8a8" stroke-width="1" stroke-dasharray="4,4"/>
+            <line x1="22" y1="50" x2="118" y2="50" stroke="#c8b8a8" stroke-width="1" stroke-dasharray="4,4"/>
+            <!-- Corner tufts -->
+            <circle cx="36" cy="38" r="4" fill="#b8a898" stroke="#a89888" stroke-width="1"/>
+            <circle cx="104" cy="38" r="4" fill="#b8a898" stroke="#a89888" stroke-width="1"/>
+            <circle cx="36" cy="62" r="4" fill="#b8a898" stroke="#a89888" stroke-width="1"/>
+            <circle cx="104" cy="62" r="4" fill="#b8a898" stroke="#a89888" stroke-width="1"/>
+          </svg>
+          <span class="pillow-status">TAP TO HIT</span>
+        </button>
+      </div>
+
+    </div><!-- /sim-objects -->
+  </div>
+
+</div><!-- /screen-game -->
+
+<!-- ══════════════════════════════════════════════════════════
+     GAME OVER / WIN SCREEN
+══════════════════════════════════════════════════════════ -->
+<div id="screen-gameover" class="screen hidden">
+  <div class="go-content">
+    <h2 id="go-title">YOU WERE TAKEN</h2>
+    <p id="go-msg">The monster claimed you in the night…</p>
+    <div class="go-buttons">
+      <button id="btn-restart" class="btn-primary">TRY AGAIN</button>
+      <button id="btn-menu"    class="btn-secondary">Main Menu</button>
+    </div>
+  </div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
