@@ -77,6 +77,7 @@ function tryConnectArduino() {
     parser.on('data', (raw) => {
       try {
         const data = JSON.parse(raw.trim());
+        console.log('[Arduino]', data);
         broadcast({ type: 'arduino', data });
       } catch (_) { /* malformed line — skip */ }
     });

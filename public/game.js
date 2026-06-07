@@ -1,65 +1,68 @@
 /**
  * Echoes of the Night — Game Engine
  *
- * State machine:
- *   Phase:    intro → playing → gameover | win
- *   Room:     idle | monster_wardrobe | flashlight_on | parents
+ * Phase:  intro → playing → gameover | win
+ * Room:   idle | monster_wardrobe | flashlight_on | parents | bed_monster | bed_monster_pillow
+ *
+ * Event queue (tek kuyruk, 1/3 ihtimalle her biri):
+ *   - Dolap canavarı (görsel) → fener
+ *   - Yatak canavarı (görsel) → yastık
+ *   - Ses olayı: canavar sesi → yastık  |  ebeveyn tuzağı → tepki verme
  *
  * Controls:
- *   W / ↑     Hold — music box volume up
- *   F         Press once — flashlight (auto-off after 1 s)
- *   Space     Press once — hit the pillow
- *   M / B     Debug: spawn wardrobe / bed monster
+ *   W / ↑     Basılı tut — müzik kutusu ses artır
+ *   F         Tek tuş   — fener (1 s sonra kapanır)
+ *   Space     Tek tuş   — yastığa vur
+ *   M / B / P Debug: dolap / yatak / ses olayı
  */
 
 'use strict';
 
 // ════════════════════════════════════════════════════════════
-//  ASSET PATHS  ← sadece buraya bak, başka yerde değişiklik gerekmez
+//  ASSET PATHS
 // ════════════════════════════════════════════════════════════
 const ASSETS = {
   images: {
-    idle          : 'images/room_idle.jpg',
-    monster       : 'images/room_wardrobe_monster.png',
-    flashlight    : 'images/room_flashlight.png',
-    parents       : 'images/room_parents.png',
-    bedMonster    : 'images/room_monster_under_bed_nopillow.png',
-    bedPillow     : 'images/room_monster_under_bed_pillow.png',
+    idle       : 'images/room_idle.jpg',
+    monster    : 'images/room_wardrobe_monster.png',
+    flashlight : 'images/room_flashlight.png',
+    parents    : 'images/room_parents.png',
+    bedMonster : 'images/room_monster_under_bed_nopillow.png',
+    bedPillow  : 'images/room_monster_under_bed_pillow.png',
   },
   audio: {
-    // public/audio/ klasörüne MP3 koyunca otomatik çalışır
-    monsterGrowl  : 'audio/monster_growl.mp3',
-    pillowHit     : 'audio/pillow_hit.mp3',
-    motherWarning : 'audio/mother_warning.mp3',
-    fatherFatal   : 'audio/father_fatal.mp3',
-    musicBox      : 'audio/music_box.mp3',
-    monsterAttack : 'audio/monster_attack.mp3',
+    // isimde "monster" var → canavar sesi → yastıkla tepki vermeli
+    monster     : ['audio/monster_sound_sound.m4a', 'audio/monster_soundbagvoice.m4a', 'audio/monster_sound_hiss.m4a'],
+    monsterSteps: ['audio/footsteps_monster.m4a'],
+    // isimde "parent" var → ebeveyn tuzağı → tepki verilmemeli
+    parentDecoy : ['audio/footsteps_parents.m4a', 'audio/parents_mouth_voice.m4a', 'audio/parents_voice_hiss.m4a'],
+    // anne / baba sahnesi sesleri — replika bitene kadar sahne bitmez
+    motherVisit : ['audio/mother_sound_1.m4a','audio/mother_sound_2.m4a','audio/mother_sound_3.m4a','audio/mother_sound_4.m4a','audio/mother_sound_5.m4a'],
+    fatherVisit : ['audio/father_sound_1.m4a','audio/father_sound_2.m4a','audio/father_sound_3.m4a','audio/father_sound_4.m4a','audio/father_sound_5.m4a'],
   }
 };
+
+const BG_MUSIC_SRC = 'audio/horror-music-box_sound.mp3';
 
 // ════════════════════════════════════════════════════════════
 //  CONSTANTS
 // ════════════════════════════════════════════════════════════
 const C = Object.freeze({
-  TICK_MS             : 200,
-  SANITY_DECAY        : 0.12,
-  SANITY_REGEN        : 6,
-  SANITY_THRESHOLD    : 20,
-  SANITY_DRAIN_KEY    : 3,
+  TICK_MS          : 200,
+  SANITY_DECAY     : 0.12,
+  SANITY_REGEN     : 6,
+  SANITY_THRESHOLD : 20,
+  SANITY_DRAIN_KEY : 3,
 
-  MONSTER_SPAWN_MIN   : 1000,
-  MONSTER_SPAWN_MAX   : 15000,
-  MONSTER_TIMEOUT     : 5000,
-  BED_SPAWN_MIN       : 1000,
-  BED_SPAWN_MAX       : 15000,
-  BED_TIMEOUT         : 5000,
+  MONSTER_SPAWN_MIN: 1000,
+  MONSTER_SPAWN_MAX: 15000,
+  MONSTER_TIMEOUT  : 5000,
 
-  // Flashlight: tek tuşa basınca 1 saniye açık kalır, sonra kapanır
-  FLASHLIGHT_DURATION : 1000,
-  FLASHLIGHT_COOLDOWN : 1200,  // sonraki kullanım için bekleme
-  FLASHLIGHT_LUX      : 180,
+  FLASHLIGHT_DURATION: 1000,
+  FLASHLIGHT_COOLDOWN: 1200,
+  FLASHLIGHT_LUX     : 500,
 
-  WIN_SECONDS         : 180,
+  WIN_SECONDS: 180,
 });
 
 // ════════════════════════════════════════════════════════════
@@ -71,50 +74,88 @@ let G = {
   health      : 3,
   sanity      : 78,
 
-  wardrobeMonster    : false,
-  bedMonster         : false,
-  attacked           : false,
-  falsePositiveCount : 0,
+  wardrobeMonster   : false,
+  bedMonster        : false,
+  attacked          : false,
+  falsePositiveCount: 0,
+
+  // Ses-only olay: { type:'monster'|'parent', audio:Audio }
+  soundEvent      : null,
+  _soundEventTimer: null,
 
   keyUp         : false,
   keyDown       : false,
   flashOn       : false,
-  flashCooldown : false,   // tek tuş sonrası spam önler
+  flashCooldown : false,
+  parentVisiting: false,   // anne/baba sahnesi boyunca tüm tuşlar kilitli
 
-  arduinoConnected : false,
-  survivalSec      : 0,
+  arduinoConnected: false,
+  survivalSec     : 0,
 
-  _loop    : null,
-  _clock   : null,
-  _wSpawn  : null,
-  _bSpawn  : null,
-  _wAttack : null,
-  _bAttack : null,
-  _wRepel  : null,
-  _mtInt   : null,   // monster countdown interval
+  _loop      : null,
+  _clock     : null,
+  _eventSpawn: null,
+  _wAttack   : null,
+  _bAttack   : null,
+  _wRepel    : null,
+  _mtInt     : null,
 };
 
 // ════════════════════════════════════════════════════════════
 //  AUDIO SYSTEM
-//  — Dosya yoksa sessizce atlar; dosya eklenince çalışır
 // ════════════════════════════════════════════════════════════
-const sfx = {};
+const sfxPools = {};   // category → Audio[]
+let bgMusic = null;
+let lastPot  = null;   // potansiyometre delta takibi
 
 function initAudio() {
-  Object.entries(ASSETS.audio).forEach(([key, path]) => {
-    try {
-      sfx[key] = new window.Audio(path);
-      sfx[key].load();
-    } catch (_) {}
+  Object.entries(ASSETS.audio).forEach(([key, paths]) => {
+    sfxPools[key] = paths.map(src => {
+      try { const a = new Audio(src); a.preload = 'auto'; return a; }
+      catch (_) { return null; }
+    }).filter(Boolean);
   });
-  if (sfx.musicBox) sfx.musicBox.loop = true;
+
+  try {
+    bgMusic = new Audio(BG_MUSIC_SRC);
+    bgMusic.loop    = true;
+    bgMusic.volume  = 0.5;
+    bgMusic.preload = 'auto';
+  } catch (_) {}
 }
 
-function play(key) {
-  const s = sfx[key];
-  if (!s) return;
-  s.currentTime = 0;
-  s.play().catch(() => {});
+// Kategoriden rastgele bir ses çalar, Audio nesnesini döndürür (yoksa null)
+function playRandom(category) {
+  const pool = sfxPools[category];
+  if (!pool || !pool.length) return null;
+  const a = pool[Math.floor(Math.random() * pool.length)];
+  a.currentTime = 0;
+  a.play().catch(() => {});
+  return a;
+}
+
+// Aktif ses olayını iptal eder
+function clearActiveSoundEvent() {
+  if (!G.soundEvent) return;
+  clearTimeout(G._soundEventTimer);
+  try { G.soundEvent.audio.pause(); G.soundEvent.audio.currentTime = 0; } catch (_) {}
+  G.soundEvent = null;
+}
+
+function startBgMusic() {
+  if (bgMusic) bgMusic.play().catch(() => {});
+}
+
+function stopBgMusic() {
+  if (!bgMusic) return;
+  bgMusic.pause();
+  bgMusic.currentTime = 0;
+}
+
+// Sanity düştükçe müzik kutusu sesi kısılır
+function updateBgMusicVolume() {
+  if (!bgMusic) return;
+  bgMusic.volume = Math.max(0.03, (G.sanity / 100) * 0.55);
 }
 
 // ════════════════════════════════════════════════════════════
@@ -124,17 +165,17 @@ let D = {};
 
 function cacheDOM() {
   D.screens = {
-    intro    : document.getElementById('screen-intro'),
-    game     : document.getElementById('screen-game'),
-    gameover : document.getElementById('screen-gameover'),
+    intro   : document.getElementById('screen-intro'),
+    game    : document.getElementById('screen-game'),
+    gameover: document.getElementById('screen-gameover'),
   };
   D.rooms = {
-    idle               : document.getElementById('room-idle'),
-    monster_wardrobe   : document.getElementById('room-monster'),
-    flashlight_on      : document.getElementById('room-flashlight'),
-    parents            : document.getElementById('room-parents'),
-    bed_monster        : document.getElementById('room-bed-monster'),
-    bed_monster_pillow : document.getElementById('room-bed-pillow'),
+    idle              : document.getElementById('room-idle'),
+    monster_wardrobe  : document.getElementById('room-monster'),
+    flashlight_on     : document.getElementById('room-flashlight'),
+    parents           : document.getElementById('room-parents'),
+    bed_monster       : document.getElementById('room-bed-monster'),
+    bed_monster_pillow: document.getElementById('room-bed-pillow'),
   };
 
   D.rooms.idle.src               = ASSETS.images.idle;
@@ -147,37 +188,34 @@ function cacheDOM() {
   const introBg = document.querySelector('.intro-bg');
   if (introBg) introBg.style.backgroundImage = `url('${ASSETS.images.idle}')`;
 
-  D.sanityFill   = document.getElementById('sanity-fill');
-  D.sanityPct    = document.getElementById('sanity-pct');
-  D.hearts       = document.querySelectorAll('.heart-icon');
-  D.warning      = document.getElementById('warning-msg');
-  D.flash        = document.getElementById('attack-flash');
-  D.timer        = document.getElementById('survival-timer');
-  D.goTitle      = document.getElementById('go-title');
-  D.goMsg        = document.getElementById('go-msg');
-  D.arduinoTag   = document.getElementById('arduino-tag');
-  D.simHint      = document.getElementById('sim-hint');
-  D.flashBtn     = document.getElementById('btn-flashlight');
-  D.pillowBtn    = document.getElementById('btn-pillow');
-  D.volUp        = document.getElementById('btn-vol-up');
-  D.volDown      = document.getElementById('btn-vol-down');
+  D.sanityFill = document.getElementById('sanity-fill');
+  D.sanityPct  = document.getElementById('sanity-pct');
+  D.hearts     = document.querySelectorAll('.heart-icon');
+  D.warning    = document.getElementById('warning-msg');
+  D.flash      = document.getElementById('attack-flash');
+  D.timer      = document.getElementById('survival-timer');
+  D.goTitle    = document.getElementById('go-title');
+  D.goMsg      = document.getElementById('go-msg');
+  D.arduinoTag = document.getElementById('arduino-tag');
+  D.simHint    = document.getElementById('sim-hint');
+  D.flashBtn   = document.getElementById('btn-flashlight');
+  D.pillowBtn  = document.getElementById('btn-pillow');
+  D.volUp      = document.getElementById('btn-vol-up');
+  D.volDown    = document.getElementById('btn-vol-down');
 
-  // Monster countdown timer
   D.monsterTimer = document.getElementById('monster-timer');
   D.mtCount      = document.getElementById('mt-count');
   D.mtArc        = document.getElementById('mt-arc');
 }
 
 // ════════════════════════════════════════════════════════════
-//  MONSTER COUNTDOWN TIMER
-//  — Sadece görsel canavar çıktığında başlar (ses tuzaklarında değil)
+//  MONSTER COUNTDOWN TIMER (sadece görsel canavarlar)
 // ════════════════════════════════════════════════════════════
 const MT_CIRC = 2 * Math.PI * 20; // r=20 → 125.66
 
 function showMonsterTimer(totalSec) {
   if (!D.monsterTimer) return;
   clearInterval(G._mtInt);
-
   let remaining = totalSec;
   _updateMtUI(remaining, totalSec);
   D.monsterTimer.classList.remove('hidden');
@@ -218,15 +256,13 @@ function showScreen(name) {
 // ════════════════════════════════════════════════════════════
 function setRoom(state) {
   if (G.roomState === state) return;
-
   const prev = D.rooms[G.roomState];
   const next = D.rooms[state];
   if (!prev || !next) return;
-
+  G.roomState = state;              // mantıksal durum hemen güncellenir
   prev.classList.add('fade-out');
   setTimeout(() => {
     prev.classList.remove('active', 'fade-out');
-    G.roomState = state;
     next.classList.add('active');
   }, 350);
 }
@@ -237,6 +273,8 @@ function setRoom(state) {
 function startGame() {
   stopAllTimers();
   hideMonsterTimer();
+  clearActiveSoundEvent();
+  stopBgMusic();
 
   G.phase              = 'playing';
   G.roomState          = 'idle';
@@ -249,6 +287,8 @@ function startGame() {
   G.survivalSec        = 0;
   G.flashOn            = false;
   G.flashCooldown      = false;
+  G.parentVisiting     = false;
+  lastPot              = null;   // bağlantı sıfırlanınca pot geçmişi temizlenir
 
   Object.values(D.rooms).forEach(r => r.classList.remove('active', 'fade-out'));
   D.rooms.idle.classList.add('active');
@@ -260,16 +300,15 @@ function startGame() {
   updateTimer();
 
   showScreen('game');
+  startBgMusic();
 
   G._loop  = setInterval(gameTick, C.TICK_MS);
   G._clock = setInterval(clockTick, 1000);
-
-  scheduleWardrobeMonster();
-  scheduleBedMonster();
+  scheduleNextEvent();
 }
 
 function stopAllTimers() {
-  [G._loop, G._clock, G._wSpawn, G._bSpawn, G._wAttack, G._bAttack, G._wRepel, G._mtInt]
+  [G._loop, G._clock, G._eventSpawn, G._wAttack, G._bAttack, G._wRepel, G._mtInt, G._soundEventTimer]
     .forEach(t => { if (t) { clearTimeout(t); clearInterval(t); } });
 }
 
@@ -279,13 +318,12 @@ function stopAllTimers() {
 function gameTick() {
   if (G.phase !== 'playing') return;
 
-  if (!G.arduinoConnected) {
-    if (G.keyUp) {
-      G.sanity = Math.min(100, G.sanity + C.SANITY_REGEN);
-    } else {
-      const extra = G.keyDown ? C.SANITY_DRAIN_KEY : 0;
-      G.sanity = Math.max(0, G.sanity - C.SANITY_DECAY - extra);
-    }
+  // G.keyUp klavyeden (W/↑) veya Arduino pot deltasından gelir — her ikisi de aynı logiği kullanır
+  if (G.keyUp) {
+    G.sanity = Math.min(100, G.sanity + C.SANITY_REGEN);
+  } else {
+    const extra = G.keyDown ? C.SANITY_DRAIN_KEY : 0;
+    G.sanity = Math.max(0, G.sanity - C.SANITY_DECAY - extra);
   }
 
   updateSanityBar();
@@ -303,20 +341,71 @@ function clockTick() {
 }
 
 // ════════════════════════════════════════════════════════════
-//  MONSTER SPAWNING
+//  EVENT QUEUE — tek kuyruk: görsel veya ses olayı
 // ════════════════════════════════════════════════════════════
-function scheduleWardrobeMonster() {
+function scheduleNextEvent() {
+  clearTimeout(G._eventSpawn);
+  if (G.parentVisiting) return;   // anne/baba sahnesi bitince kendi schedule'lar
   const d = C.MONSTER_SPAWN_MIN + Math.random() * (C.MONSTER_SPAWN_MAX - C.MONSTER_SPAWN_MIN);
-  G._wSpawn = setTimeout(spawnWardrobeMonster, d);
+  G._eventSpawn = setTimeout(() => {
+    const r = Math.random();
+    if      (r < 0.34) spawnWardrobeMonster();
+    else if (r < 0.67) spawnBedMonster();
+    else               spawnSoundEvent();
+  }, d);
 }
 
+// ── Ses-only Olay ───────────────────────────────────────────
+function spawnSoundEvent() {
+  if (G.phase !== 'playing' || G.wardrobeMonster || G.bedMonster || G.parentVisiting) {
+    scheduleNextEvent();
+    return;
+  }
+
+  const isMonster = Math.random() < 0.5;
+  const audio = playRandom(isMonster ? 'monster' : 'parentDecoy');
+  if (!audio) { scheduleNextEvent(); return; }
+
+  G.soundEvent = { type: isMonster ? 'monster' : 'parent', audio };
+
+  if (isMonster) {
+    setWarning('👂  You hear something in the dark…');
+
+    let handled = false;
+    const onMiss = () => {
+      if (handled) return;
+      handled = true;
+      if (G.soundEvent?.type === 'monster') {
+        G.soundEvent = null;
+        falsePositive();
+      }
+    };
+    audio.addEventListener('ended', onMiss, { once: true });
+    G._soundEventTimer = setTimeout(onMiss, 8000);
+
+  } else {
+    // Ebeveyn tuzağı — hiçbir uyarı verilmez, tepki verilmemeli
+    let handled = false;
+    const onDone = () => {
+      if (handled) return;
+      handled = true;
+      if (G.soundEvent?.type === 'parent') {
+        G.soundEvent = null;
+        scheduleNextEvent();
+      }
+    };
+    audio.addEventListener('ended', onDone, { once: true });
+    G._soundEventTimer = setTimeout(onDone, 8000);
+  }
+}
+
+// ── Görsel: Dolap Canavarı ──────────────────────────────────
 function spawnWardrobeMonster() {
-  if (G.phase !== 'playing' || G.wardrobeMonster) return;
+  if (G.phase !== 'playing' || G.wardrobeMonster || G.parentVisiting) return;
   G.wardrobeMonster = true;
   setRoom('monster_wardrobe');
   setWarning('👁  SOMETHING IS IN THE WARDROBE — SHINE YOUR FLASHLIGHT!');
-  play('monsterGrowl');
-  showMonsterTimer(C.MONSTER_TIMEOUT / 1000);   // ← timer başlar
+  showMonsterTimer(C.MONSTER_TIMEOUT / 1000);
 
   G._wAttack = setTimeout(() => {
     if (G.wardrobeMonster) monsterAttack('wardrobe_timeout');
@@ -327,29 +416,24 @@ function repelWardrobeMonster() {
   if (!G.wardrobeMonster) return;
   G.wardrobeMonster = false;
   clearTimeout(G._wAttack);
-  hideMonsterTimer();                           // ← timer durur
+  hideMonsterTimer();
   setRoom('idle');
   setWarning('✓  Monster driven back!', 1800);
-  scheduleWardrobeMonster();
+  scheduleNextEvent();
 }
 
-function scheduleBedMonster() {
-  const d = C.BED_SPAWN_MIN + Math.random() * (C.BED_SPAWN_MAX - C.BED_SPAWN_MIN);
-  G._bSpawn = setTimeout(spawnBedMonster, d);
-}
-
+// ── Görsel: Yatak Altı Canavarı ─────────────────────────────
 function spawnBedMonster() {
-  if (G.phase !== 'playing' || G.bedMonster) return;
+  if (G.phase !== 'playing' || G.bedMonster || G.parentVisiting) return;
   G.bedMonster = true;
   document.getElementById('screen-game').classList.add('bed-glow');
-  setRoom('bed_monster');                        // ← yatak canavarı görseli
+  setRoom('bed_monster');
   setWarning('💀  SOMETHING UNDER THE BED — HIT THE PILLOW!');
-  play('monsterGrowl');
-  showMonsterTimer(C.BED_TIMEOUT / 1000);
+  showMonsterTimer(C.MONSTER_TIMEOUT / 1000);
 
   G._bAttack = setTimeout(() => {
     if (G.bedMonster) monsterAttack('bed_timeout');
-  }, C.BED_TIMEOUT);
+  }, C.MONSTER_TIMEOUT);
 }
 
 function repelBedMonster() {
@@ -358,23 +442,25 @@ function repelBedMonster() {
   clearTimeout(G._bAttack);
   hideMonsterTimer();
   document.getElementById('screen-game').classList.remove('bed-glow');
-  setRoom('bed_monster_pillow');                 // ← yastık çarptı, kısa an göster
+  setRoom('bed_monster_pillow');
   setWarning('✓  Under-bed monster scared away!', 1800);
   setTimeout(() => { if (G.phase === 'playing') setRoom('idle'); }, 700);
-  scheduleBedMonster();
+  scheduleNextEvent();
 }
 
 // ════════════════════════════════════════════════════════════
 //  PLAYER ACTIONS
 // ════════════════════════════════════════════════════════════
 
-// ── Flashlight — tek tuş, 1 saniye sonra otomatik kapanır ──
+// ── Fener — tek tuş, 1 s sonra kapanır ─────────────────────
 function flashlightActivate() {
-  if (G.phase !== 'playing' || G.flashCooldown) return;
-  G.flashOn     = true;
+  if (G.phase !== 'playing' || G.flashCooldown || G.parentVisiting) return;
+  G.flashOn       = true;
   G.flashCooldown = true;
 
   if (G.wardrobeMonster) {
+    // Doğru tepki: dolap canavarına fener
+    clearTimeout(G._wAttack);
     setRoom('flashlight_on');
     setWarning('💡  FLASHLIGHT ON!');
     G._wRepel = setTimeout(() => {
@@ -382,52 +468,100 @@ function flashlightActivate() {
       if (G.wardrobeMonster) repelWardrobeMonster();
       setTimeout(() => { G.flashCooldown = false; }, 200);
     }, C.FLASHLIGHT_DURATION);
+
+  } else if (G.soundEvent) {
+    // Ses olayı sırasında fener: her zaman yanlış
+    // (canavar sesi → yastık gerekirdi; ebeveyn sesi → tepki olmamalıydı)
+    G.flashOn = false;
+    setTimeout(() => { G.flashCooldown = false; }, C.FLASHLIGHT_COOLDOWN);
+    clearActiveSoundEvent();
+    falsePositive();
+
   } else {
-    // Canavar yokken feneri açmak → yanlış alarm
+    // Olay yokken fener → yanlış alarm
     G.flashOn = false;
     setTimeout(() => { G.flashCooldown = false; }, C.FLASHLIGHT_COOLDOWN);
     falsePositive();
   }
 }
 
-// ── Pillow — tek tuş ────────────────────────────────────────
+// ── Yastık — tek tuş ────────────────────────────────────────
 function pillowHit() {
-  if (G.phase !== 'playing') return;
-  play('pillowHit');
+  if (G.phase !== 'playing' || G.parentVisiting) return;
 
   if (G.bedMonster) {
+    // Doğru tepki: yatak canavarına yastık
     repelBedMonster();
+
+  } else if (G.soundEvent?.type === 'monster') {
+    // Doğru tepki: canavar sesine yastık
+    clearActiveSoundEvent();
+    setWarning('✓  You drove it away!', 1800);
+    scheduleNextEvent();
+
+  } else if (G.soundEvent?.type === 'parent') {
+    // Yanlış tepki: ebeveyn sesine yastık vurdun
+    clearActiveSoundEvent();
+    falsePositive();
+
   } else {
+    // Olay yokken yastık → yanlış alarm
     falsePositive();
   }
 }
 
-// ── False Positive / Parent System ──────────────────────────
+// ── Yanlış Tepki / Ebeveyn Sistemi ──────────────────────────
 function falsePositive() {
   G.falsePositiveCount++;
-  if (G.falsePositiveCount === 1) {
-    showParent('mother');
-  } else {
-    showParent('father');
-  }
+  if (G.falsePositiveCount === 1) showParent('mother');
+  else                             showParent('father');
 }
 
 function showParent(who) {
+  G.parentVisiting = true;
   setRoom('parents');
-  // NOT: ebeveyn sahnesi için timer başlamaz — bu kasıtlı (ses tuzağı tasarımı)
 
   if (who === 'mother') {
-    play('motherWarning');
+    const audio = playRandom('motherVisit');
     setWarning('🚪  YOUR MOTHER IS HERE. Settle down — first warning!');
-    setTimeout(() => {
-      if (G.phase === 'playing') { setRoom('idle'); setWarning(''); }
-    }, 3500);
+
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (G.phase === 'playing') {
+        setRoom('idle');
+        setWarning('');
+        G.parentVisiting = false;
+        scheduleNextEvent();   // sahne bitti, yeni olayı planla
+      }
+    };
+    if (audio) {
+      audio.addEventListener('ended', finish, { once: true });
+      setTimeout(finish, 8000);   // fallback: ses yüklenememişse max bekleme
+    } else {
+      setTimeout(finish, 3500);
+    }
+
   } else {
-    play('fatherFatal');
+    // Baba → oyun bitti
+    const audio = playRandom('fatherVisit');
     setWarning('🚪  YOUR FATHER ARRIVED. There is no escape now...');
     G.health = 0;
     updateHealthUI();
-    setTimeout(triggerGameOver, 2200);
+
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      triggerGameOver();
+    };
+    if (audio) {
+      audio.addEventListener('ended', finish, { once: true });
+      setTimeout(finish, 10000);
+    } else {
+      setTimeout(finish, 2200);
+    }
   }
 }
 
@@ -442,9 +576,9 @@ function monsterAttack(reason) {
   updateHealthUI();
   triggerFlash();
   hideMonsterTimer();
-  play('monsterAttack');
+  clearActiveSoundEvent();
 
-  G.flashOn     = false;
+  G.flashOn       = false;
   G.flashCooldown = false;
 
   const msgs = {
@@ -454,14 +588,14 @@ function monsterAttack(reason) {
   };
   setWarning(msgs[reason] || '🩸  MONSTER ATTACK!');
 
-  if (G.wardrobeMonster) { G.wardrobeMonster = false; clearTimeout(G._wAttack); scheduleWardrobeMonster(); }
-  if (G.bedMonster)      { G.bedMonster = false;      clearTimeout(G._bAttack); scheduleBedMonster(); }
+  if (G.wardrobeMonster) { G.wardrobeMonster = false; clearTimeout(G._wAttack); }
+  if (G.bedMonster)      { G.bedMonster = false;      clearTimeout(G._bAttack); }
   document.getElementById('screen-game').classList.remove('bed-glow');
   setRoom('idle');
 
   setTimeout(() => {
     G.attacked = false;
-    if (G.phase === 'playing') setWarning('');
+    if (G.phase === 'playing') { setWarning(''); scheduleNextEvent(); }
   }, 2500);
 
   if (G.health <= 0) setTimeout(triggerGameOver, 1200);
@@ -475,11 +609,12 @@ function triggerGameOver() {
   G.phase = 'gameover';
   stopAllTimers();
   hideMonsterTimer();
+  clearActiveSoundEvent();
+  stopBgMusic();
 
   D.goTitle.textContent = 'YOU WERE TAKEN';
   D.goTitle.style.color = '';
   D.goMsg.textContent   = 'The monster claimed you in the night…';
-
   setTimeout(() => showScreen('gameover'), 400);
 }
 
@@ -488,11 +623,12 @@ function triggerWin() {
   G.phase = 'win';
   stopAllTimers();
   hideMonsterTimer();
+  clearActiveSoundEvent();
+  stopBgMusic();
 
   D.goTitle.textContent = 'MORNING HAS COME';
   D.goTitle.style.color = '#f0c060';
   D.goMsg.textContent   = 'You survived until dawn. The monsters are gone… for now.';
-
   showScreen('gameover');
 }
 
@@ -508,6 +644,8 @@ function updateSanityBar() {
   if      (pct < C.SANITY_THRESHOLD) D.sanityFill.classList.add('danger');
   else if (pct < 30)                 D.sanityFill.classList.add('warning');
   else                               D.sanityFill.classList.add('safe');
+
+  updateBgMusicVolume();
 }
 
 function updateHealthUI() {
@@ -559,13 +697,16 @@ function initKeyboard() {
         pillowHit();
         break;
       case 'KeyF':
-        if (!e.repeat) flashlightActivate();  // e.repeat: tuş basılı tutulursa ateşleme
+        if (!e.repeat) flashlightActivate();
         break;
       case 'KeyM':
         setTimeout(spawnWardrobeMonster, 100);
         break;
       case 'KeyB':
         setTimeout(spawnBedMonster, 100);
+        break;
+      case 'KeyP':
+        setTimeout(spawnSoundEvent, 100);   // debug: ses olayı
         break;
     }
   });
@@ -601,7 +742,6 @@ function initButtonControls() {
     el.addEventListener('touchend',   onUp);
   };
 
-  // Müzik kutusu — basılı tut
   bindHold(D.volUp,
     () => { G.keyUp = true;  G.keyDown = false; rotateKnob(+1); },
     () => { G.keyUp = false; document.querySelector('.musicbox-knob')?.classList.remove('spinning'); }
@@ -611,13 +751,11 @@ function initButtonControls() {
     () => { G.keyDown = false; }
   );
 
-  // Fener — tek tıklama (hold gerekmez)
   if (D.flashBtn) {
     D.flashBtn.addEventListener('click', flashlightActivate);
     D.flashBtn.addEventListener('touchstart', (e) => { e.preventDefault(); flashlightActivate(); }, { passive: false });
   }
 
-  // Yastık — tek tıklama + sıçrama animasyonu
   if (D.pillowBtn) {
     const hitPillow = () => {
       D.pillowBtn.classList.add('hit');
@@ -649,14 +787,16 @@ function initWebSocket() {
       }
 
       if (msg.type === 'arduino' && G.phase === 'playing') {
-        const { pot, piezo, lux } = msg.data;
+        const { pot, piezo } = msg.data;
+        const lux = msg.data.lux ?? msg.data.ldr ?? 0;  // Arduino'ya göre alan adı değişebilir
 
-        G.sanity = (pot / 1023) * 100;
+        // Potansiyometre: sadece yukarı çevirince sanity artar
+        if (lastPot !== null) {
+          G.keyUp = (pot - lastPot) > 8;
+        }
+        lastPot = pot;
 
-        // Fener: yükselen kenar (flashlight yeni açıldıysa) → tek tetikleme
-        const luxOn = lux > C.FLASHLIGHT_LUX;
-        if (luxOn && !G.flashCooldown) flashlightActivate();
-
+        if (lux > C.FLASHLIGHT_LUX && !G.flashCooldown) flashlightActivate();
         if (piezo === 1) pillowHit();
       }
     };
