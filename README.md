@@ -14,9 +14,9 @@ A fixed-perspective bedroom horror experience where physical hardware objects (p
 | CSS custom properties | Theming and atmospheric palette |
 | CSS animations & transitions | Room image crossfades, sanity pulse, flicker effects |
 | Google Fonts (Cinzel + Crimson Pro) | Typography — classical horror meets storybook |
-| Web Audio API | (placeholder slots for self-recorded audio) |
+| HTML5 Audio API | Self-recorded m4a/mp3 sounds, dynamic timeout from audio duration |
 
-No framework needed — the game state is a single JS object; React/Vue would add complexity without benefit for this use case.
+No framework needed — the game state is a single JS object.
 
 ### Backend — Arduino Bridge
 | Technology | Role |
@@ -31,14 +31,12 @@ No framework needed — the game state is a single JS object; React/Vue would ad
 | Component | Role | Connection |
 |---|---|---|
 | Arduino Uno | Reads all sensors, serializes to JSON | USB → computer |
-| Potentiometer | Music box volume (sanity level) | A0 (wiper), 5V + GND (outers) |
+| Potentiometer | Music box volume — turning up increases sanity | A0 (wiper), 5V + GND (outers) |
 | Piezo vibration sensor | Pillow hit detection | A1 + GND |
 | GY-30 BH1750 light sensor | Flashlight lux detection | A4 (SDA), A5 (SCL), 3.3V, GND |
-| 22 AWG stranded wire | Non-invasive sensor integration | — |
-| Conductive copper tape | Pillow sensor mounting | — |
 
 ### Arduino Library Required
-- **BH1750** by Christopher Laws — install via Arduino IDE → Tools → Manage Libraries → search "BH1750"
+- **BH1750** by Christopher Laws — Arduino IDE → Tools → Manage Libraries → search "BH1750"
 
 ---
 
@@ -47,9 +45,9 @@ No framework needed — the game state is a single JS object; React/Vue would ad
 ```
 Physical Object              Arduino             Node.js Server           Browser Game
 ─────────────────────────    ──────────────    ────────────────────    ─────────────────
-Potentiometer turned    ──►  A0 analog read  ──►  Serial → JSON     ──►  sanity bar fill
-Pillow hit              ──►  A1 piezo > 80   ──►  piezo: 1 event    ──►  repel bed monster
-Flashlight on wardrobe  ──►  I2C lux > 180   ──►  lux: 450.0        ──►  repel wardrobe monster
+Potentiometer turned up ──►  A0 analog read  ──►  Serial → JSON     ──►  sanity bar rises
+Pillow hit              ──►  A1 piezo > 80   ──►  piezo: 1 event    ──►  repel bed monster / respond to sound
+Flashlight on wardrobe  ──►  I2C lux > 500   ──►  lux: 650.0        ──►  repel wardrobe monster
                                                     WebSocket push
 ```
 
@@ -58,6 +56,44 @@ Arduino sends every 100ms:
 {"pot":812,"piezo":0,"lux":45.0}
 ```
 
+The potentiometer controls sanity via **delta** — turning it clockwise increases sanity. Holding it still or turning it back does nothing; sanity decays naturally on its own.
+
+---
+
+## Game Mechanics
+
+### Event Queue
+One event at a time, chosen randomly (each ~33% chance):
+
+| Event | Cue | Correct Response |
+|---|---|---|
+| Wardrobe monster (visual) | Room image changes — monster in wardrobe | Flashlight (F / shine light) |
+| Bed monster (visual) | Room image changes — monster under bed + red glow | Pillow (Space / hit) |
+| Monster sound (audio only) | You hear a monster sound, no visual change | Pillow within sound duration |
+| Parent decoy sound (audio only) | You hear a parent-like sound, no visual change | Do nothing |
+
+### False Positive System
+Reacting incorrectly triggers the parent system:
+- **Wrong reaction to sound event** (flashlight when pillow was needed, or reacting to a parent decoy)
+- **Acting when no event is active** (pressing Space or F with nothing happening)
+
+| Mistake count | Consequence |
+|---|---|
+| 1st false positive | Mother enters — random voice line plays; scene ends when audio finishes |
+| 2nd false positive | Father enters — random voice line plays; game over after audio ends |
+
+### Audio System
+All sounds are self-recorded. Categories:
+
+| File pattern | When it plays | Player should |
+|---|---|---|
+| `monster_sound_*` | Sound-only monster event | Hit pillow within sound duration |
+| `footsteps_monster` | Sound-only monster event | Hit pillow within sound duration |
+| `parents_*` / `footsteps_parents` | Parent decoy event | Do nothing |
+| `mother_sound_1–5` | Mother visit scene | Wait (random one plays, scene lasts until audio ends) |
+| `father_sound_1–5` | Father visit scene | Wait (game over after audio ends) |
+| `horror-music-box_sound.mp3` | Background loop | Volume tracks sanity — lower sanity = quieter music |
+
 ---
 
 ## Game States
@@ -65,10 +101,12 @@ Arduino sends every 100ms:
 ```
 intro ──[PLAY]──► playing
                     │
-                    ├── idle          (normal room)
-                    ├── monster_wardrobe  (monster visible without flashlight)
-                    ├── flashlight_on    (girl with flashlight, monster revealed)
-                    └── parents          (parent enters after false positive)
+                    ├── idle                (normal room)
+                    ├── monster_wardrobe    (monster in wardrobe — needs flashlight)
+                    ├── flashlight_on       (flashlight shining on monster)
+                    ├── bed_monster         (monster under bed — needs pillow)
+                    ├── bed_monster_pillow  (pillow hit animation, brief)
+                    └── parents             (parent enters after false positive)
                     │
                     ├──[health = 0]──► gameover
                     └──[180 sec]────► win
@@ -77,36 +115,39 @@ intro ──[PLAY]──► playing
 ### Penalty System
 | Mistake | Consequence |
 |---|---|
-| Sanity drops below 10% while monster is active | Lose 1 heart |
-| Monster not addressed within 14s (wardrobe) / 10s (bed) | Lose 1 heart |
-| False positive (wrong action when no monster) — 1st | Mother enters (warning) |
-| False positive — 2nd | Father enters → instant game over |
+| Sanity drops below 20% while a visual monster is active | Lose 1 heart |
+| Visual monster not addressed within 5s | Lose 1 heart |
+| Monster sound not answered with pillow within sound duration | False positive |
+| Reacting to parent decoy or acting with no event | False positive |
+| 2nd false positive | Father arrives → game over |
 
 ---
 
 ## Setup
 
-### Option A — No Arduino (Keyboard Simulation)
-Just open `public/index.html` in a browser. No server needed.
+### Option A — No Arduino (Keyboard / Mouse Simulation)
+
+Run `npm start` and open `http://localhost:3001`. Click the on-screen objects or use keyboard:
 
 | Key | Action |
 |---|---|
 | W / ↑ (hold) | Turn music box up (fill sanity) |
-| F (hold) | Flashlight on wardrobe |
+| F (single press) | Flashlight — auto-off after 1 s |
 | Space | Hit pillow |
 | M | Spawn wardrobe monster (debug) |
-| B | Spawn under-bed monster (debug) |
+| B | Spawn bed monster (debug) |
+| P | Trigger sound event (debug) |
 
 ### Option B — With Arduino + Node.js Server
 
 1. **Install dependencies**
    ```bash
-   cd echoes-of-the-night
+   cd echoes_of_the_Night
    npm install
    ```
 
 2. **Upload Arduino sketch**
-   - Open `arduino/echoes_of_night.ino` in Arduino IDE
+   - Open `echoes_of_night.ino` in Arduino IDE
    - Install BH1750 library (Tools → Manage Libraries → "BH1750")
    - Wire hardware per wiring table above
    - Upload to Arduino Uno
@@ -134,45 +175,19 @@ npm run dev       # auto-restarts server on file changes (nodemon)
 
 ---
 
-## Adding Audio
-
-The game has placeholder hooks for audio. To add self-recorded sounds, edit `public/game.js`:
-
-```javascript
-// Example: play a monster growl when wardrobe monster spawns
-function spawnWardrobeMonster() {
-  // ... existing code ...
-  playSound('monster_growl.mp3');   // add your audio file to public/audio/
-}
-```
-
-Add an `AudioManager` object:
-```javascript
-const sounds = {};
-function loadSounds() {
-  ['monster_growl', 'pillow_hit', 'mother_warning', 'father_fatal', 'music_box']
-    .forEach(name => {
-      sounds[name] = new Audio(`audio/${name}.mp3`);
-    });
-}
-function playSound(name) {
-  if (sounds[name]) { sounds[name].currentTime = 0; sounds[name].play(); }
-}
-```
-
----
-
 ## Sensor Tuning
 
-Edit these values in `game.js` constants or `arduino/echoes_of_night.ino`:
+Edit constants in `public/game.js` (the `C` object near the top):
 
-| Parameter | Where | Default | Notes |
+| Parameter | Constant | Default | Notes |
 |---|---|---|---|
-| Flashlight lux threshold | `game.js` → `C.FLASHLIGHT_LUX` | 180 | Raise if room is bright |
-| Piezo hit threshold | `.ino` → `PIEZO_HIT_THRESHOLD` | 80 | Lower if pillow is dense |
-| Sanity threshold | `game.js` → `C.SANITY_THRESHOLD` | 10% | Below this → monster attacks |
-| Monster spawn interval | `game.js` → `C.MONSTER_SPAWN_MIN/MAX` | 22–38s | Adjust difficulty |
-| Win time | `game.js` → `C.WIN_SECONDS` | 180s | Presentation session length |
+| Flashlight lux threshold | `FLASHLIGHT_LUX` | 500 | Raise if room is bright |
+| Sanity danger threshold | `SANITY_THRESHOLD` | 20% | Below this + visual monster → attack |
+| Monster reaction window | `MONSTER_TIMEOUT` | 5 000 ms | Time to respond to visual monster |
+| Monster spawn interval | `MONSTER_SPAWN_MIN/MAX` | 1–15 s | Adjust difficulty |
+| Win time | `WIN_SECONDS` | 180 s | Survive this long to win |
+
+Piezo threshold is set in `echoes_of_night.ino` (`PIEZO_HIT_THRESHOLD`).
 
 ---
 
