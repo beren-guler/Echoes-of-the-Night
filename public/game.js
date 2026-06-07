@@ -152,10 +152,11 @@ function stopBgMusic() {
   bgMusic.currentTime = 0;
 }
 
-// Sanity düştükçe müzik kutusu sesi kısılır
+// Sanity düştükçe müzik kutusu sesi belirgin şekilde azalır (quadratic eğri)
 function updateBgMusicVolume() {
   if (!bgMusic) return;
-  bgMusic.volume = Math.max(0.03, (G.sanity / 100) * 0.55);
+  const t = G.sanity / 100;
+  bgMusic.volume = Math.max(0.02, t * t * 0.7);
 }
 
 // ════════════════════════════════════════════════════════════
@@ -369,8 +370,6 @@ function spawnSoundEvent() {
   G.soundEvent = { type: isMonster ? 'monster' : 'parent', audio };
 
   if (isMonster) {
-    setWarning('👂  You hear something in the dark…');
-
     let handled = false;
     const onMiss = () => {
       if (handled) return;

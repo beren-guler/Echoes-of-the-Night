@@ -348,8 +348,9 @@ html, body {
 /* ─── Warning Message ────────────────────────────────────── */
 #warning-msg {
   position: absolute;
-  bottom: 110px; left: 50%;
+  bottom: 205px; left: 50%;
   transform: translateX(-50%);
+  z-index: 16;   /* sim-controls (15) üstünde */
   background: var(--warning-bg);
   border: 1px solid var(--warning-bdr);
   color: #f8d0c0;
