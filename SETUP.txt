@@ -1,0 +1,63 @@
+ECHOES OF THE NIGHT — Setup Guide
+===================================
+
+REQUIREMENTS
+------------
+  Node.js   v18 or higher    https://nodejs.org
+  npm       (comes with Node.js)
+
+
+QUICK START
+-----------
+  1) Go to the project folder:
+       cd echoes_of_the_Night
+
+  2) Install dependencies:
+       npm install
+
+  3) Start the server:
+       npm start
+
+  4) Open in browser:
+       http://localhost:3001
+
+
+PLAYING WITHOUT ARDUINO (keyboard / mouse mode)
+------------------------------------------------
+  Arduino is not required. The game runs in keyboard simulation mode automatically.
+  Use the on-screen objects or the keyboard shortcuts below:
+
+    W / Up Arrow   Hold        — turn music box up (fill sanity bar)
+    F              Single press — flashlight (auto-off after 1 s)
+    Space          Single press — hit the pillow
+    M              Debug        — spawn wardrobe monster
+    B              Debug        — spawn bed monster
+    P              Debug        — trigger sound event
+
+
+PLAYING WITH ARDUINO (optional)
+--------------------------------
+  Hardware components:
+    - Arduino Uno / Nano
+    - Potentiometer      → A0        (music box volume)
+    - Piezo sensor       → A1        (pillow hit detection)
+    - GY-30 BH1750       → A4/A5 I2C (flashlight lux sensor)
+
+  Upload the Arduino sketch:
+    Open echoes_of_night.ino in Arduino IDE and upload to the board.
+
+  Serial port (default: /dev/ttyACM0):
+    On Windows, find your port (e.g. COM3) and start the server like this:
+      ARDUINO_PORT=COM3 npm start
+
+
+NODE.JS PACKAGES (installed automatically via npm install)
+----------------------------------------------------------
+  express                    ^4.18.2   Web server
+  ws                         ^8.16.0   WebSocket (browser ↔ server)
+  serialport                 ^12.0.0   Arduino serial communication
+  @serialport/parser-readline ^12.0.0  Line parser for serial stream
+
+  [dev]
+  nodemon                    ^3.1.0    Auto-restart on file changes
+                                       Usage: npm run dev
