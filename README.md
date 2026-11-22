@@ -32,11 +32,11 @@ No framework needed — the game state is a single JS object.
 |---|---|---|
 | Arduino Uno | Reads all sensors, serializes to JSON | USB → computer |
 | Potentiometer | Music box volume — turning up increases sanity | A0 (wiper), 5V + GND (outers) |
-| Piezo vibration sensor | Pillow hit detection | A1 + GND |
-| GY-30 BH1750 light sensor | Flashlight lux detection | A4 (SDA), A5 (SCL), 3.3V, GND |
+| Piezo vibration sensor | Pillow hit detection | A5 + GND |
+| LDR (photoresistor) | Flashlight detection | A2, in a voltage divider with a fixed resistor (5V, GND) |
 
-### Arduino Library Required
-- **BH1750** by Christopher Laws — Arduino IDE → Tools → Manage Libraries → search "BH1750"
+### Arduino Libraries
+None — the sketch only uses `analogRead`.
 
 ---
 
@@ -46,14 +46,14 @@ No framework needed — the game state is a single JS object.
 Physical Object              Arduino             Node.js Server           Browser Game
 ─────────────────────────    ──────────────    ────────────────────    ─────────────────
 Potentiometer turned up ──►  A0 analog read  ──►  Serial → JSON     ──►  sanity bar rises
-Pillow hit              ──►  A1 piezo > 80   ──►  piezo: 1 event    ──►  repel bed monster / respond to sound
-Flashlight on wardrobe  ──►  I2C lux > 500   ──►  lux: 650.0        ──►  repel wardrobe monster
+Pillow hit              ──►  A5 piezo hit    ──►  piezo: 1 event    ──►  repel bed monster / respond to sound
+Flashlight on wardrobe  ──►  A2 LDR read     ──►  ldr: 650         ──►  ldr > 500 → repel wardrobe monster
                                                     WebSocket push
 ```
 
 Arduino sends every 100ms:
 ```json
-{"pot":812,"piezo":0,"lux":45.0}
+{"pot":812,"piezo":0,"piezoRaw":0,"ldr":45}
 ```
 
 The potentiometer controls sanity via **delta** — turning it clockwise increases sanity. Holding it still or turning it back does nothing; sanity decays naturally on its own.
@@ -148,7 +148,6 @@ Run `npm start` and open `http://localhost:3001`. Click the on-screen objects or
 
 2. **Upload Arduino sketch**
    - Open `echoes_of_night.ino` in Arduino IDE
-   - Install BH1750 library (Tools → Manage Libraries → "BH1750")
    - Wire hardware per wiring table above
    - Upload to Arduino Uno
 
@@ -181,13 +180,13 @@ Edit constants in `public/game.js` (the `C` object near the top):
 
 | Parameter | Constant | Default | Notes |
 |---|---|---|---|
-| Flashlight lux threshold | `FLASHLIGHT_LUX` | 500 | Raise if room is bright |
+| Flashlight LDR threshold (0–1023) | `FLASHLIGHT_LUX` | 500 | Raise if room is bright |
 | Sanity danger threshold | `SANITY_THRESHOLD` | 20% | Below this + visual monster → attack |
 | Monster reaction window | `MONSTER_TIMEOUT` | 5 000 ms | Time to respond to visual monster |
 | Monster spawn interval | `MONSTER_SPAWN_MIN/MAX` | 1–15 s | Adjust difficulty |
 | Win time | `WIN_SECONDS` | 180 s | Survive this long to win |
 
-Piezo threshold is set in `echoes_of_night.ino` (`PIEZO_HIT_THRESHOLD`).
+Piezo sensitivity and debounce are set in `echoes_of_night.ino` (`piezoRaw > 1`, `PIEZO_DEBOUNCE_MS` = 300 ms).
 
 ---
 
